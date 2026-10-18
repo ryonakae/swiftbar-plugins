@@ -1,0 +1,10 @@
+{
+  "strata": {
+    "port": 8080,
+    "models": []
+  },
+  "splash": {
+    "port": 8000,
+    "models": []
+  }
+}
