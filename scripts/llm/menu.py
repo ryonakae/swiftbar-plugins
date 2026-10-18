@@ -21,6 +21,8 @@ def numeric(value, suffix, divisor=1):
 
 
 def render(configuration, observations, selections, entry):
+    if any(ord(c) < 32 or ord(c) == 127 or c == '|' for c in str(entry)):
+        return ' | sfimage=exclamationmark.triangle\n---\n配置パスに改行・制御文字・パイプは使用できません\n'
     states = [v.get('state') for v in observations.values()]
     if configuration.errors or any(s in ('error', 'unknown', 'occupied', 'stop_failed') for s in states):
         icon = 'exclamationmark.triangle'

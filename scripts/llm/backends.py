@@ -1,4 +1,5 @@
 import errno
+import http.client
 import json
 import math
 import os
@@ -77,7 +78,10 @@ def request_json(port, path):
 
 
 def positive_number(value):
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0
+    try:
+        return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0
+    except OverflowError:
+        return False
 
 
 def observe(engine, port, previous=None, now=None, wake=''):
@@ -97,7 +101,9 @@ def observe(engine, port, previous=None, now=None, wake=''):
                 rate = live.get('tok_s')
                 if live.get('state') == 'generating' and positive_number(rate):
                     result['tps'] = rate
-            except (OSError, ValueError, urllib.error.URLError, AttributeError):
+            except (OSError, ValueError, urllib.error.URLError, http.client.HTTPException, AttributeError, TypeError) as error:
+                if isinstance(error, urllib.error.HTTPError):
+                    error.close()
                 result['error'] = '生成速度の監視不可'
             return result
         data = request_json(port, '/status')
@@ -132,6 +138,6 @@ def observe(engine, port, previous=None, now=None, wake=''):
             result['state'] = 'stopped'
         else:
             result['error'] = '監視APIから応答がありません'
-    except (OSError, ValueError, AttributeError, TypeError):
+    except (OSError, ValueError, http.client.HTTPException, AttributeError, TypeError, OverflowError):
         result['error'] = '監視APIの形式が異なるか、応答を取得できません'
     return result

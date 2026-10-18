@@ -13,6 +13,14 @@ class MenuTests(unittest.TestCase):
         self.assertIn('エンジンメモリ: —', output)
         self.assertTrue(output.startswith(' | sfimage='))
 
+    def test_entry_path_cannot_add_menu_lines_or_parameters(self):
+        for path in ['/tmp/a\n--Injected | bash=/bin/echo/x.sh', '/tmp/a|bash=/bin/echo/x.sh']:
+            with self.subTest(path=path):
+                output = render(Configuration(), {}, {}, path)
+                self.assertNotIn('bash=', output)
+                self.assertNotIn('Injected', output)
+                self.assertIn('配置パス', output)
+
     def test_external_server_has_no_mutating_actions(self):
         config = Configuration(engines={'splash': {'port': 8000, 'models': [
             {'id': 'x', 'name': 'x', 'model': 'example/model', 'args': []}]}})

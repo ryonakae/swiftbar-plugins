@@ -46,10 +46,17 @@ class ObservationTests(unittest.TestCase):
                         'ready': True, 'metrics': {'decode_output_tokens': 100},
                         'maximum_context_tokens': 8192, 'scheduler': {'decoding': 0}}
         self.code = 200
+        self.truncated = False
         outer = self
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
                 self.send_response(outer.code)
+                if outer.truncated:
+                    self.send_header('Transfer-Encoding', 'chunked')
+                    self.end_headers()
+                    self.wfile.write(b'10\r\nshort')
+                    self.close_connection = True
+                    return
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
                 self.wfile.write(json.dumps(outer.payload).encode())
@@ -78,6 +85,15 @@ class ObservationTests(unittest.TestCase):
         self.assertIsNone(observe('splash', self.port, previous, now=15, wake='new')['tps'])
         self.payload['transport'] = {'restarts': 1}
         self.assertIsNone(observe('splash', self.port, previous, now=15)['tps'])
+
+    def test_interrupted_http_and_huge_counter_degrade_without_exception(self):
+        self.truncated = True
+        observed = observe('splash', self.port)
+        self.assertEqual(observed['state'], 'occupied')
+        self.assertIsNone(observed['tps'])
+        self.truncated = False
+        self.payload['metrics']['decode_output_tokens'] = 10 ** 400
+        self.assertIsNone(observe('splash', self.port)['tps'])
 
     def test_bad_service_and_auth_are_not_stopped(self):
         self.code = 401
