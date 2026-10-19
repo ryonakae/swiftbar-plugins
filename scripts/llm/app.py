@@ -63,6 +63,11 @@ def lock(path):
         yield
 
 
+def connection_port(status, settings):
+    port = status.get('port') if status.get('owned') or status.get('state') == 'unknown' else None
+    return port or (settings or {}).get('port')
+
+
 class Controller:
     def __init__(self, paths, confirm=dialogs.confirm):
         self.paths = paths
@@ -157,8 +162,7 @@ class Controller:
         for engine in config.ENGINES:
             current = self.manager.status(engine)
             settings = cfg.engines.get(engine)
-            port = current.get('port') if current.get('owned') or current.get('state') == 'unknown' else None
-            port = port or (settings or {}).get('port')
+            port = connection_port(current, settings)
             if not port:
                 views[engine] = current if current.get('state') != 'stopped' else {'state': 'unconfigured'}
                 continue
@@ -179,8 +183,7 @@ class Controller:
                         observed['tps'] = None
                 save_json(sample_path, {'sample': sample, 'wall': wall})
             view = {**current, **observed, **memory}
-            if current.get('model_name'):
-                view['model_name'] = current['model_name']
+            view['model_name'] = (current.get('model_name') or observed.get('model_name')) if current.get('owned') else observed.get('model_name')
             if current.get('owned'):
                 if current['state'] in ('stopping', 'stop_failed', 'error'):
                     view['state'] = current['state']
@@ -242,7 +245,7 @@ class Controller:
             self.paths.logs.mkdir(parents=True, exist_ok=True)
         elif engine in config.ENGINES and verb == 'chat':
             status = self.manager.status(engine)
-            port = status.get('port') or cfg.engines.get(engine, {}).get('port')
+            port = connection_port(status, cfg.engines.get(engine))
             if not port:
                 raise ValueError('接続先が未設定です')
             target = f'http://127.0.0.1:{port}/'

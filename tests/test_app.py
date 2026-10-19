@@ -1,10 +1,14 @@
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import socket
 import sys
 import tempfile
+import threading
 import time
 import unittest
+from unittest.mock import patch
 
 from scripts.llm.app import Controller, Paths
 
@@ -13,6 +17,29 @@ def free_port():
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
         return sock.getsockname()[1]
+
+
+@contextmanager
+def external_splash():
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(json.dumps({'schema_version': 6, 'instance': {'id': 'external', 'model': 'external-model'},
+                                        'ready': True, 'metrics': {'decode_output_tokens': 0}}).encode())
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield server.server_port
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
 
 
 class ActionTests(unittest.TestCase):
@@ -110,6 +137,73 @@ class ActionTests(unittest.TestCase):
         output = self.app.render('/tmp/llm.5s.sh')
         self.assertIn('実行可能ファイルが見つかりません', output)
         self.assertFalse(self.app.manager.status('splash')['owned'])
+
+    def test_chat_after_stop_uses_current_configured_port(self):
+        self.start()
+        self.assertEqual(self.app.action('stop', 'splash')['state'], 'stopped')
+        port = free_port()
+        self.source['splash']['port'] = port
+        self.paths.config.write_text(json.dumps(self.source))
+        self.assertIn(f'接続先: 127.0.0.1:{port}', self.app.render('/tmp/llm.5s.sh'))
+        with patch('subprocess.run') as opened:
+            self.app.open_target('chat', 'splash')
+        self.assertEqual(opened.call_args.args[0], ['/usr/bin/open', f'http://127.0.0.1:{port}/'])
+
+    def test_managed_chat_keeps_launch_port_after_config_changes_or_removal(self):
+        original = self.start()['port']
+        self.source['splash']['port'] = free_port()
+        self.source['splash']['models'][0]['name'] = '設定だけの名前'
+        self.paths.config.write_text(json.dumps(self.source))
+        for removed in (False, True):
+            with self.subTest(config_removed=removed):
+                if removed:
+                    self.paths.config.unlink()
+                output = self.app.render('/tmp/llm.5s.sh')
+                self.assertIn(f'接続先: 127.0.0.1:{original}', output)
+                self.assertIn('稼働モデル: 最初', output)
+                with patch('subprocess.run') as opened:
+                    self.app.open_target('chat', 'splash')
+                self.assertEqual(opened.call_args.args[0][-1], f'http://127.0.0.1:{original}/')
+
+    def test_unknown_ownership_chat_keeps_launch_port(self):
+        original = self.start()['port']
+        self.source['splash']['port'] = free_port()
+        self.paths.config.write_text(json.dumps(self.source))
+        with patch('scripts.llm.macos._libc.proc_pid_rusage', side_effect=PermissionError('fixture denial')):
+            output = self.app.render('/tmp/llm.5s.sh')
+            self.assertIn('Splash — 所有権不明', output)
+            self.assertIn(f'接続先: 127.0.0.1:{original}', output)
+            with patch('subprocess.run') as opened:
+                self.app.open_target('chat', 'splash')
+            self.assertEqual(opened.call_args.args[0][-1], f'http://127.0.0.1:{original}/')
+
+    def test_stopped_chat_without_configuration_does_not_open_stale_endpoint(self):
+        self.start()
+        self.app.action('stop', 'splash')
+        self.paths.config.unlink()
+        with patch('subprocess.run') as opened:
+            with self.assertRaisesRegex(ValueError, '未設定'):
+                self.app.open_target('chat', 'splash')
+            opened.assert_not_called()
+
+    def test_model_name_is_not_running_after_stop(self):
+        self.start()
+        self.app.action('stop', 'splash')
+        output = self.app.render('/tmp/llm.5s.sh')
+        self.assertNotIn('稼働モデル: 最初', output)
+        self.assertIn('Splash — 停止中\n--稼働モデル: —', output)
+        self.assertEqual(self.app.selection('splash'), 'first')
+
+    def test_external_model_name_replaces_stopped_generation(self):
+        self.start()
+        self.app.action('stop', 'splash')
+        with external_splash() as port:
+            self.source['splash']['port'] = port
+            self.paths.config.write_text(json.dumps(self.source))
+            output = self.app.render('/tmp/llm.5s.sh')
+        self.assertIn('Splash — 外部で稼働中\n--稼働モデル: external-model', output)
+        self.assertNotIn('稼働モデル: 最初', output)
+        self.assertNotIn('param1=stop param2=splash', output)
 
     def test_confirmed_switch_changes_worker_generation(self):
         old = self.start()
