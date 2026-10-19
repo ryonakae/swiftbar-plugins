@@ -89,6 +89,9 @@ class ActionTests(unittest.TestCase):
         self.assertEqual(self.app.selection('splash'), 'first')
         self.assertEqual(self.app.manager.status('splash')['nonce'], status['nonce'])
         self.assertEqual(len(self.questions), 2)
+        self.assertIn('Change the Splash model?', self.questions[0])
+        self.assertIn('Stop Splash?', self.questions[1])
+        self.assertIn('Active requests will be interrupted.', self.questions[1])
 
     def test_stop_works_after_config_is_removed_and_always_confirms(self):
         self.start()
@@ -103,7 +106,7 @@ class ActionTests(unittest.TestCase):
             self.paths.config.write_text('{}')
             return True
         self.app.confirm = mutate_and_confirm
-        with self.assertRaisesRegex(ValueError, '確認中'):
+        with self.assertRaisesRegex(ValueError, 'while confirming'):
             self.app.action('stop', 'splash')
         self.assertEqual(self.app.manager.status('splash')['nonce'], status['nonce'])
 
@@ -124,7 +127,7 @@ class ActionTests(unittest.TestCase):
         while not marker.exists() and time.monotonic() < deadline:
             time.sleep(0.01)
         self.assertTrue(marker.exists())
-        with self.assertRaisesRegex(ValueError, '停止が完了'):
+        with self.assertRaisesRegex(ValueError, 'Stop did not complete'):
             self.app.action('select', 'splash', 'second')
         self.assertEqual(self.app.selection('splash'), 'first')
         self.assertEqual(self.app.manager.status('splash')['nonce'], old['nonce'])
@@ -135,7 +138,7 @@ class ActionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.app.action('start', 'splash')
         output = self.app.render('/tmp/llm.5s.sh')
-        self.assertIn('実行可能ファイルが見つかりません', output)
+        self.assertIn('Executable not found', output)
         self.assertFalse(self.app.manager.status('splash')['owned'])
 
     def test_chat_after_stop_uses_current_configured_port(self):
@@ -144,7 +147,7 @@ class ActionTests(unittest.TestCase):
         port = free_port()
         self.source['splash']['port'] = port
         self.paths.config.write_text(json.dumps(self.source))
-        self.assertIn(f'接続先: 127.0.0.1:{port}', self.app.render('/tmp/llm.5s.sh'))
+        self.assertIn(f'Endpoint: 127.0.0.1:{port}', self.app.render('/tmp/llm.5s.sh'))
         with patch('subprocess.run') as opened:
             self.app.open_target('chat', 'splash')
         self.assertEqual(opened.call_args.args[0], ['/usr/bin/open', f'http://127.0.0.1:{port}/'])
@@ -159,8 +162,8 @@ class ActionTests(unittest.TestCase):
                 if removed:
                     self.paths.config.unlink()
                 output = self.app.render('/tmp/llm.5s.sh')
-                self.assertIn(f'接続先: 127.0.0.1:{original}', output)
-                self.assertIn('稼働モデル: 最初', output)
+                self.assertIn(f'Endpoint: 127.0.0.1:{original}', output)
+                self.assertIn('Running model: 最初', output)
                 with patch('subprocess.run') as opened:
                     self.app.open_target('chat', 'splash')
                 self.assertEqual(opened.call_args.args[0][-1], f'http://127.0.0.1:{original}/')
@@ -171,8 +174,8 @@ class ActionTests(unittest.TestCase):
         self.paths.config.write_text(json.dumps(self.source))
         with patch('scripts.llm.macos._libc.proc_pid_rusage', side_effect=PermissionError('fixture denial')):
             output = self.app.render('/tmp/llm.5s.sh')
-            self.assertIn('Splash — 所有権不明', output)
-            self.assertIn(f'接続先: 127.0.0.1:{original}', output)
+            self.assertIn('Splash — Ownership unknown', output)
+            self.assertIn(f'Endpoint: 127.0.0.1:{original}', output)
             with patch('subprocess.run') as opened:
                 self.app.open_target('chat', 'splash')
             self.assertEqual(opened.call_args.args[0][-1], f'http://127.0.0.1:{original}/')
@@ -182,7 +185,7 @@ class ActionTests(unittest.TestCase):
         self.app.action('stop', 'splash')
         self.paths.config.unlink()
         with patch('subprocess.run') as opened:
-            with self.assertRaisesRegex(ValueError, '未設定'):
+            with self.assertRaisesRegex(ValueError, 'not configured'):
                 self.app.open_target('chat', 'splash')
             opened.assert_not_called()
 
@@ -190,8 +193,8 @@ class ActionTests(unittest.TestCase):
         self.start()
         self.app.action('stop', 'splash')
         output = self.app.render('/tmp/llm.5s.sh')
-        self.assertNotIn('稼働モデル: 最初', output)
-        self.assertIn('Splash — 停止中\n--稼働モデル: —', output)
+        self.assertNotIn('Running model: 最初', output)
+        self.assertIn('Splash — Stopped\n--Running model: —', output)
         self.assertEqual(self.app.selection('splash'), 'first')
 
     def test_external_model_name_replaces_stopped_generation(self):
@@ -201,8 +204,8 @@ class ActionTests(unittest.TestCase):
             self.source['splash']['port'] = port
             self.paths.config.write_text(json.dumps(self.source))
             output = self.app.render('/tmp/llm.5s.sh')
-        self.assertIn('Splash — 外部で稼働中\n--稼働モデル: external-model', output)
-        self.assertNotIn('稼働モデル: 最初', output)
+        self.assertIn('Splash — Running externally\n--Running model: external-model', output)
+        self.assertNotIn('Running model: 最初', output)
         self.assertNotIn('param1=stop param2=splash', output)
 
     def test_confirmed_switch_changes_worker_generation(self):

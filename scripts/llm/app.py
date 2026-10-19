@@ -90,7 +90,7 @@ class Controller:
 
     def action(self, verb, engine, mid=None):
         if engine not in config.ENGINES or verb not in ('start', 'stop', 'select', 'download'):
-            raise ValueError('不明な操作です')
+            raise ValueError('Unknown action.')
         error_path = self.paths.state / f'{engine}-action-error.json'
         try:
             result = self._action(verb, engine, mid)
@@ -112,43 +112,43 @@ class Controller:
             settings = cfg.engines.get(engine)
             if verb != 'stop':
                 if settings is None:
-                    raise ValueError('エンジンが未設定です')
+                    raise ValueError('Engine is not configured.')
                 wanted = mid if verb == 'select' else self.selection(engine)
                 model = next((m for m in settings['models'] if m['id'] == wanted), None)
                 if model is None:
-                    raise ValueError('設定に存在するモデルを選択してください')
+                    raise ValueError('Select a model registered in the configuration.')
             if current.get('state') == 'unknown':
-                raise ValueError('所有権を確認できません。既存サーバーを手動で確認してください')
+                raise ValueError('Ownership cannot be verified. Check the existing server manually.')
             if verb == 'stop' and not current.get('owned'):
-                raise ValueError('自己起動したサーバーがありません。外部サーバーは停止しません')
+                raise ValueError('No managed server is running. External servers will not be stopped.')
             if verb == 'start' and current.get('owned'):
-                raise ValueError('すでに管理中のサーバーがあります')
+                raise ValueError('A managed server is already running.')
             if not current.get('owned') and verb != 'stop':
                 external = backends.observe(engine, settings['port'])
                 if external['state'] != 'stopped':
-                    raise ValueError('指定ポートは使用中または確認不能です。外部サーバーは手動で停止してください')
+                    raise ValueError('The port is in use or cannot be checked. Stop external servers manually.')
             if verb == 'select' and self.selection(engine) == mid:
                 return current
             needs_confirmation = verb in ('stop', 'download') or (verb == 'select' and current.get('owned'))
         if needs_confirmation:
             if verb == 'stop':
-                message = f'{engine.capitalize()}を停止します。処理中のリクエストは中断されます。'
+                message = f'Stop {engine.capitalize()}? Active requests will be interrupted.'
             elif verb == 'download':
-                message = 'Splashをオンラインで起動し、必要なモデルをダウンロード／更新します。稼働中のサーバーがあれば停止し、リクエストを中断します。'
+                message = 'Start Splash online to download or update the model? Any managed server will be stopped and active requests interrupted.'
             else:
-                message = f'{engine.capitalize()}のモデルを変更します。現在のサーバーを停止し、処理中のリクエストを中断します。'
+                message = f'Change the {engine.capitalize()} model? The current server will be stopped and active requests interrupted.'
             if not self.confirm(message):
                 return {**current, 'cancelled': True}
         with lock(operation_lock):
             if self.fingerprint(engine) != before:
-                raise ValueError('確認中に設定・選択・サーバーが変わりました。メニューを更新して再操作してください')
+                raise ValueError('Configuration, selection, or server changed while confirming. Refresh the menu and try again.')
             current = self.manager.status(engine)
             if verb == 'stop':
                 return self.manager.stop(engine, current['nonce'])
             if current.get('owned'):
                 stopped = self.manager.stop(engine, current['nonce'])
                 if stopped.get('state') != 'stopped':
-                    raise ValueError('停止が完了していないため、次のモデルを起動しません')
+                    raise ValueError('Stop did not complete. The next model will not be started.')
             if verb == 'select':
                 self.choose(engine, mid)
                 if not current.get('owned'):
@@ -247,14 +247,14 @@ class Controller:
             status = self.manager.status(engine)
             port = connection_port(status, cfg.engines.get(engine))
             if not port:
-                raise ValueError('接続先が未設定です')
+                raise ValueError('Endpoint is not configured.')
             target = f'http://127.0.0.1:{port}/'
         elif engine == 'strata' and verb == 'model-config':
             target = next((m['config'] for m in cfg.engines.get(engine, {}).get('models', []) if m['id'] == mid), None)
             if not target:
-                raise ValueError('モデル設定が見つかりません')
+                raise ValueError('Model config was not found.')
         else:
-            raise ValueError('不明な操作です')
+            raise ValueError('Unknown action.')
         subprocess.run(['/usr/bin/open', str(target)], check=True)
 
 
@@ -269,11 +269,11 @@ def main():
         elif args[0] in ('start', 'stop', 'select', 'download') and len(args) in (2, 3):
             result = controller.action(*args)
             if result.get('state') in ('error', 'stop_failed', 'unknown'):
-                dialogs.notice(result.get('error') or '操作を完了できませんでした。ログを確認してください')
+                dialogs.notice(result.get('error') or 'The action could not be completed. Check the log.')
         elif args[0] in ('config', 'log', 'chat', 'model-config') and len(args) <= 3:
             controller.open_target(*args)
         else:
-            raise ValueError('不正な引数です')
+            raise ValueError('Invalid arguments.')
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
         if args:
             dialogs.notice(str(error))

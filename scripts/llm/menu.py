@@ -3,11 +3,11 @@ import shlex
 
 from .config import ENGINES
 
-STATES = {'stopped': '停止中', 'running': '稼働中', 'starting': '起動中',
-          'stopping': '停止中…', 'stop_failed': '停止失敗', 'error': 'エラー',
-          'unknown': '所有権不明', 'external': '外部で稼働中', 'occupied': 'ポート使用中',
-          'unloaded': '稼働中・モデル未ロード', 'unavailable': '稼働中・監視不可',
-          'unconfigured': '未設定'}
+STATES = {'stopped': 'Stopped', 'running': 'Running', 'starting': 'Starting',
+          'stopping': 'Stopping…', 'stop_failed': 'Stop failed', 'error': 'Error',
+          'unknown': 'Ownership unknown', 'external': 'Running externally', 'occupied': 'Port in use',
+          'unloaded': 'Running · model unloaded', 'unavailable': 'Running · monitoring unavailable',
+          'unconfigured': 'Not configured'}
 
 
 def safe(value):
@@ -22,7 +22,7 @@ def numeric(value, suffix, divisor=1):
 
 def render(configuration, observations, selections, entry):
     if any(ord(c) < 32 or ord(c) == 127 or c == '|' for c in str(entry)):
-        return ' | sfimage=exclamationmark.triangle\n---\n配置パスに改行・制御文字・パイプは使用できません\n'
+        return ' | sfimage=exclamationmark.triangle\n---\nPlugin path must not contain newlines, control characters, or pipes\n'
     states = [v.get('state') for v in observations.values()]
     if configuration.errors or any(s in ('error', 'unknown', 'occupied', 'stop_failed') for s in states):
         icon = 'exclamationmark.triangle'
@@ -43,31 +43,31 @@ def render(configuration, observations, selections, entry):
         obs = observations.get(name, {})
         cfg = configuration.engines.get(name)
         state = obs.get('state', 'stopped' if cfg else 'unconfigured')
-        lines.append(f'{name.capitalize()} — {STATES.get(state, "不明")}')
+        lines.append(f'{name.capitalize()} — {STATES.get(state, "Unknown")}')
         if name in configuration.errors:
             lines.append(f'--{safe(configuration.errors[name])} | color=red')
         if obs.get('error'):
             lines.append(f'--{safe(obs["error"])} | color=red')
-        lines.append(f'--稼働モデル: {safe(obs.get("model_name") or "—")}')
+        lines.append(f'--Running model: {safe(obs.get("model_name") or "—")}')
         port = obs.get('port') or (cfg or {}).get('port')
         if port:
-            lines.append(f'--接続先: 127.0.0.1:{port}')
-        lines += [f'--生成速度: {numeric(obs.get("tps"), "tok/s")}',
-                  f'--エンジンメモリ: {numeric(obs.get("memory_bytes"), "GB", 1_000_000_000)}',
-                  f'--エンジンPID: {safe(obs.get("engine_pid") or "—")}',
-                  f'--コンテキスト: {safe(obs.get("context") or "—")}']
+            lines.append(f'--Endpoint: 127.0.0.1:{port}')
+        lines += [f'--Generation speed: {numeric(obs.get("tps"), "tok/s")}',
+                  f'--Engine memory: {numeric(obs.get("memory_bytes"), "GB", 1_000_000_000)}',
+                  f'--Engine PID: {safe(obs.get("engine_pid") or "—")}',
+                  f'--Context limit: {safe(obs.get("context") or "—")}']
         mutable = state not in ('external', 'occupied', 'unknown', 'starting', 'stopping')
         if obs.get('owned'):
-            action('停止…', 'stop', name)
+            action('Stop…', 'stop', name)
         models = cfg.get('models', []) if cfg else []
         selected = selections.get(name)
         chosen = next((m for m in models if m['id'] == selected), None)
         if cfg and mutable and not obs.get('owned') and chosen:
-            action('起動', 'start', name)
+            action('Start', 'start', name)
         if cfg and mutable and chosen and name == 'splash':
-            action('ダウンロード／更新して起動…', 'download', name)
+            action('Download / update and start…', 'download', name)
         if models:
-            lines.append('--モデル')
+            lines.append('--Models')
             for model in models:
                 checked = ' checked=true' if model['id'] == selected else ''
                 if mutable:
@@ -76,11 +76,11 @@ def render(configuration, observations, selections, entry):
                 else:
                     lines.append(f'----{safe(model["name"])} | disabled=true{checked}')
             if not chosen:
-                lines.append('--起動するモデルを選択してください')
+                lines.append('--Select a model to start')
         if port:
-            action('チャットを開く', 'chat', name)
-        action('ログを開く', 'log', name)
+            action('Open chat', 'chat', name)
+        action('Open log', 'log', name)
         if name == 'strata' and chosen:
-            action('モデル設定を開く', 'model-config', name, chosen['id'])
-    lines += ['---', f'設定を開く | bash={shlex.quote(str(entry))} param1=config terminal=false refresh=true']
+            action('Open model config', 'model-config', name, chosen['id'])
+    lines += ['---', f'Open config | bash={shlex.quote(str(entry))} param1=config terminal=false refresh=true']
     return '\n'.join(lines) + '\n'

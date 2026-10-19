@@ -17,7 +17,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def executable(path):
     if not path or not os.path.isfile(path) or not os.access(path, os.X_OK):
-        raise ValueError('実行可能ファイルが見つかりません。設定とインストール先を確認してください')
+        raise ValueError('Executable not found. Check the configuration and installation path.')
     return str(path)
 
 
@@ -26,15 +26,15 @@ def launch_plan(engine, cfg, model, online=False, environment=None):
     common = {'model_id': model['id'], 'model_name': model['name'], 'port': cfg['port']}
     if engine == 'strata':
         if online:
-            raise ValueError('Strataの取得・準備は既存のセットアップで行ってください')
+            raise ValueError('Use the Strata setup tools to download and prepare models.')
         root = Path(cfg['directory'])
         python = executable(root / '.venv/bin/python')
         server = root / 'serve/server.py'
         if not server.is_file():
-            raise ValueError('Strataのserve/server.pyが見つかりません')
+            raise ValueError('Strata serve/server.py was not found.')
         source = json.loads(Path(model['config']).read_text(encoding='utf-8-sig'))
         if not isinstance(source, dict) or not isinstance(source.get('args'), list) or not isinstance(source.get('exe'), str):
-            raise ValueError('Strataの設定JSONにはexeとargsが必要です')
+            raise ValueError('Strata config JSON requires exe and args.')
         base = Path(source.get('cwd') or str(root))
         if not base.is_absolute():
             base = root / base
@@ -45,7 +45,7 @@ def launch_plan(engine, cfg, model, online=False, environment=None):
                                      '--host', '127.0.0.1', '--port', str(cfg['port'])],
                 'cwd': str(root), 'env': env, 'engine_path': str(native)}
     if engine != 'splash':
-        raise ValueError('不明なエンジンです')
+        raise ValueError('Unknown engine.')
     binary = cfg.get('executable') or shutil.which('splash')
     if not binary:
         binary = next((p for p in ('/opt/homebrew/bin/splash', '/usr/local/bin/splash') if os.path.isfile(p)), None)
@@ -70,10 +70,10 @@ def request_json(port, path):
     with opener.open(f'http://127.0.0.1:{port}{path}', timeout=1.5) as response:
         raw = response.read(2_000_001)
         if len(raw) > 2_000_000:
-            raise ValueError('監視APIの応答が大きすぎます')
+            raise ValueError('Monitoring API response is too large.')
         value = json.loads(raw)
         if not isinstance(value, dict):
-            raise ValueError('監視APIの応答形式が異なります')
+            raise ValueError('Unexpected monitoring API response format.')
         return value
 
 
@@ -91,7 +91,7 @@ def observe(engine, port, previous=None, now=None, wake=''):
         if engine == 'strata':
             health = request_json(port, '/health')
             if health.get('service') != 'strata':
-                raise ValueError('このポートの応答はStrataではありません')
+                raise ValueError('The service on this port is not Strata.')
             result.update(state='running' if health.get('loaded') else 'unloaded',
                           model_name=health.get('model'), context=health.get('max_context'))
             try:
@@ -104,14 +104,14 @@ def observe(engine, port, previous=None, now=None, wake=''):
             except (OSError, ValueError, urllib.error.URLError, http.client.HTTPException, AttributeError, TypeError) as error:
                 if isinstance(error, urllib.error.HTTPError):
                     error.close()
-                result['error'] = '生成速度の監視不可'
+                result['error'] = 'Generation speed is unavailable.'
             return result
         data = request_json(port, '/status')
         instance = data.get('instance', {})
         if (type(data.get('schema_version')) is not int or data['schema_version'] < 1
                 or not isinstance(instance.get('id'), str) or not instance['id']
                 or type(data.get('ready')) is not bool or not isinstance(data.get('metrics'), dict)):
-            raise ValueError('このポートの応答はSplashではありません')
+            raise ValueError('The service on this port is not Splash.')
         released = data.get('weights', {}).get('released', False)
         result.update(state=('unloaded' if released else 'running') if data.get('ready') else 'starting',
                       model_name=instance.get('model'), context=data.get('maximum_context_tokens'),
@@ -131,13 +131,13 @@ def observe(engine, port, previous=None, now=None, wake=''):
             result.update(state='unavailable', tps=None, sample=None)
         return result
     except urllib.error.HTTPError as error:
-        result['error'] = '監視APIに認証が必要です' if error.code in (401, 403) else f'監視API: HTTP {error.code}'
+        result['error'] = 'Monitoring API requires authentication.' if error.code in (401, 403) else f'Monitoring API: HTTP {error.code}'
         error.close()
     except urllib.error.URLError as error:
         if isinstance(error.reason, ConnectionRefusedError) or getattr(error.reason, 'errno', None) == errno.ECONNREFUSED:
             result['state'] = 'stopped'
         else:
-            result['error'] = '監視APIから応答がありません'
+            result['error'] = 'No response from the monitoring API.'
     except (OSError, ValueError, http.client.HTTPException, AttributeError, TypeError, OverflowError):
-        result['error'] = '監視APIの形式が異なるか、応答を取得できません'
+        result['error'] = 'Monitoring API response is unavailable or has an unexpected format.'
     return result
