@@ -1,9 +1,10 @@
+from importlib import import_module
 from pathlib import Path
 from subprocess import CompletedProcess
 import unittest
 from unittest.mock import patch
 
-from scripts.llm import dialogs
+dialogs = import_module('scripts.dialogs')
 
 
 class DialogTests(unittest.TestCase):

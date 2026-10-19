@@ -1,0 +1,1 @@
+../plugins/local-llm-server/local-llm-server.5s.sh

@@ -1,4 +1,4 @@
-"""実エンジン・外部通信なしで所有者の寿命と終了処理を確認する。"""
+"""Test ownership lifetime and shutdown without real engines or external traffic."""
 
 import argparse
 import json

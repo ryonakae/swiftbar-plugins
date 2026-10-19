@@ -21,12 +21,10 @@ def executable(path):
     return str(path)
 
 
-def launch_plan(engine, cfg, model, online=False, environment=None):
+def launch_plan(engine, cfg, model, environment=None):
     env = dict(os.environ if environment is None else environment)
     common = {'model_id': model['id'], 'model_name': model['name'], 'port': cfg['port']}
     if engine == 'strata':
-        if online:
-            raise ValueError('Use the Strata setup tools to download and prepare models.')
         root = Path(cfg['directory'])
         python = executable(root / '.venv/bin/python')
         server = root / 'serve/server.py'
@@ -52,12 +50,8 @@ def launch_plan(engine, cfg, model, online=False, environment=None):
     binary = executable(binary)
     command = [binary, 'serve', '--model', model['model'], '--host', '127.0.0.1', '--port', str(cfg['port'])]
     command.extend(model.get('args', []))
-    if online:
-        env.pop('HF_HUB_OFFLINE', None)
-        env.pop('TRANSFORMERS_OFFLINE', None)
-    else:
-        command.append('--offline')
-        env['HF_HUB_OFFLINE'] = '1'
+    env.pop('HF_HUB_OFFLINE', None)
+    env.pop('TRANSFORMERS_OFFLINE', None)
     if 'modelCacheDir' in cfg:
         env['HF_HUB_CACHE'] = cfg['modelCacheDir']
     native = Path(binary).resolve().parent.parent / 'libexec/engine/splash'

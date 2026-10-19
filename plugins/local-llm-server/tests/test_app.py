@@ -1,3 +1,4 @@
+from importlib import import_module
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -10,7 +11,8 @@ import time
 import unittest
 from unittest.mock import patch
 
-from scripts.llm.app import Controller, Paths
+Controller = import_module('scripts.app').Controller
+Paths = import_module('scripts.app').Paths
 
 
 def free_port():
@@ -46,7 +48,7 @@ class ActionTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.paths = Paths(Path(self.tmp.name))
+        self.paths = Paths(Path(self.tmp.name), root=Path(self.tmp.name))
         self.paths.config.parent.mkdir(parents=True)
         self.binary = Path(self.tmp.name) / 'fake-splash'
         self.binary.write_text(f'#!{sys.executable}\nimport time\ntime.sleep(120)\n')
@@ -110,14 +112,6 @@ class ActionTests(unittest.TestCase):
             self.app.action('stop', 'splash')
         self.assertEqual(self.app.manager.status('splash')['nonce'], status['nonce'])
 
-    def test_online_start_cancel_does_not_start_or_change_selection(self):
-        self.app.action('select', 'splash', 'first')
-        self.answer = False
-        self.app.action('download', 'splash')
-        self.assertFalse(self.app.manager.status('splash')['owned'])
-        self.assertEqual(self.app.selection('splash'), 'first')
-        self.assertEqual(len(self.questions), 1)
-
     def test_failed_stop_does_not_change_selection_or_start_next_model(self):
         marker = Path(self.tmp.name) / 'ready'
         self.binary.write_text(f'#!{sys.executable}\nimport signal,time\nfrom pathlib import Path\n'
@@ -137,20 +131,21 @@ class ActionTests(unittest.TestCase):
         self.binary.unlink()
         with self.assertRaises(ValueError):
             self.app.action('start', 'splash')
-        output = self.app.render('/tmp/llm.5s.sh')
+        output = self.app.render('/tmp/local-llm-server.5s.sh')
         self.assertIn('Executable not found', output)
         self.assertFalse(self.app.manager.status('splash')['owned'])
 
-    def test_chat_after_stop_uses_current_configured_port(self):
+    def test_chat_after_stop_does_not_open_browser(self):
         self.start()
         self.assertEqual(self.app.action('stop', 'splash')['state'], 'stopped')
         port = free_port()
         self.source['splash']['port'] = port
         self.paths.config.write_text(json.dumps(self.source))
-        self.assertIn(f'Endpoint: 127.0.0.1:{port}', self.app.render('/tmp/llm.5s.sh'))
+        self.assertIn(f'Endpoint: 127.0.0.1:{port}', self.app.render('/tmp/local-llm-server.5s.sh'))
         with patch('subprocess.run') as opened:
-            self.app.open_target('chat', 'splash')
-        self.assertEqual(opened.call_args.args[0], ['/usr/bin/open', f'http://127.0.0.1:{port}/'])
+            with self.assertRaisesRegex(ValueError, 'not running'):
+                self.app.open_target('chat', 'splash')
+            opened.assert_not_called()
 
     def test_managed_chat_keeps_launch_port_after_config_changes_or_removal(self):
         original = self.start()['port']
@@ -161,7 +156,7 @@ class ActionTests(unittest.TestCase):
             with self.subTest(config_removed=removed):
                 if removed:
                     self.paths.config.unlink()
-                output = self.app.render('/tmp/llm.5s.sh')
+                output = self.app.render('/tmp/local-llm-server.5s.sh')
                 self.assertIn(f'Endpoint: 127.0.0.1:{original}', output)
                 self.assertIn('Running model: 最初', output)
                 with patch('subprocess.run') as opened:
@@ -172,8 +167,8 @@ class ActionTests(unittest.TestCase):
         original = self.start()['port']
         self.source['splash']['port'] = free_port()
         self.paths.config.write_text(json.dumps(self.source))
-        with patch('scripts.llm.macos._libc.proc_pid_rusage', side_effect=PermissionError('fixture denial')):
-            output = self.app.render('/tmp/llm.5s.sh')
+        with patch.object(import_module('scripts.macos')._libc, 'proc_pid_rusage', side_effect=PermissionError('fixture denial')):
+            output = self.app.render('/tmp/local-llm-server.5s.sh')
             self.assertIn('Splash — Ownership unknown', output)
             self.assertIn(f'Endpoint: 127.0.0.1:{original}', output)
             with patch('subprocess.run') as opened:
@@ -192,9 +187,9 @@ class ActionTests(unittest.TestCase):
     def test_model_name_is_not_running_after_stop(self):
         self.start()
         self.app.action('stop', 'splash')
-        output = self.app.render('/tmp/llm.5s.sh')
+        output = self.app.render('/tmp/local-llm-server.5s.sh')
         self.assertNotIn('Running model: 最初', output)
-        self.assertIn('Splash — Stopped\n--Running model: —', output)
+        self.assertIn('Splash — Stopped | refresh=true\n--Running model: —', output)
         self.assertEqual(self.app.selection('splash'), 'first')
 
     def test_external_model_name_replaces_stopped_generation(self):
@@ -203,8 +198,11 @@ class ActionTests(unittest.TestCase):
         with external_splash() as port:
             self.source['splash']['port'] = port
             self.paths.config.write_text(json.dumps(self.source))
-            output = self.app.render('/tmp/llm.5s.sh')
-        self.assertIn('Splash — Running externally\n--Running model: external-model', output)
+            output = self.app.render('/tmp/local-llm-server.5s.sh')
+            with patch('subprocess.run') as opened:
+                self.app.open_target('chat', 'splash')
+            self.assertEqual(opened.call_args.args[0][-1], f'http://127.0.0.1:{port}/')
+        self.assertIn('Splash — Running externally | refresh=true\n--Running model: external-model', output)
         self.assertNotIn('Running model: 最初', output)
         self.assertNotIn('param1=stop param2=splash', output)
 

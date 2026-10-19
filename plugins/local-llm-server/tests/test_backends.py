@@ -1,3 +1,4 @@
+from importlib import import_module
 import json
 from pathlib import Path
 import tempfile
@@ -5,22 +6,23 @@ import unittest
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from scripts.llm.backends import launch_plan, observe
+launch_plan = import_module('scripts.backends').launch_plan
+observe = import_module('scripts.backends').observe
 
 
 class LaunchTests(unittest.TestCase):
-    def test_splash_offline_and_online_do_not_change_parent_environment(self):
+    def test_splash_start_allows_downloads_without_changing_parent_environment(self):
         cfg = {'port': 8000, 'executable': '/bin/echo', 'modelCacheDir': '/tmp/models'}
         model = {'id': 'x', 'name': 'モデル', 'model': 'example/model:Q4', 'args': ['--max-memory', '12G']}
         env = {'HOME': '/tmp', 'HF_HUB_OFFLINE': '1', 'TRANSFORMERS_OFFLINE': '1'}
-        offline = launch_plan('splash', cfg, model, False, env)
-        online = launch_plan('splash', cfg, model, True, env)
-        self.assertIn('--offline', offline['command'])
-        self.assertNotIn('--offline', online['command'])
-        self.assertNotIn('HF_HUB_OFFLINE', online['env'])
-        self.assertEqual(online['env']['HF_HUB_CACHE'], '/tmp/models')
+        plan = launch_plan('splash', cfg, model, environment=env)
+        self.assertNotIn('--offline', plan['command'])
+        self.assertNotIn('HF_HUB_OFFLINE', plan['env'])
+        self.assertNotIn('TRANSFORMERS_OFFLINE', plan['env'])
+        self.assertEqual(plan['env']['HF_HUB_CACHE'], '/tmp/models')
         self.assertEqual(env['HF_HUB_OFFLINE'], '1')
-        self.assertEqual(offline['command'][offline['command'].index('--host') + 1], '127.0.0.1')
+        self.assertEqual(env['TRANSFORMERS_OFFLINE'], '1')
+        self.assertEqual(plan['command'][plan['command'].index('--host') + 1], '127.0.0.1')
 
     def test_strata_uses_original_config_and_its_working_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -33,7 +35,7 @@ class LaunchTests(unittest.TestCase):
             path.write_text(json.dumps({'exe': 'engine/strata', 'cwd': tmp, 'args': ['--spec', '2']}))
             original = path.read_bytes()
             plan = launch_plan('strata', {'directory': tmp, 'port': 8080},
-                               {'id': 'x', 'name': 'X', 'config': str(path)}, False, {})
+                               {'id': 'x', 'name': 'X', 'config': str(path)}, environment={})
             self.assertEqual(plan['command'][3:5], ['strata', '--config'])
             self.assertEqual(plan['cwd'], tmp)
             self.assertIn(str(path), plan['command'])

@@ -1,4 +1,4 @@
-"""専用セッションを保持し、保存済みPIDを停止権限にしない所有者。"""
+"""Retain a dedicated session so saved PIDs do not grant shutdown authority."""
 
 import errno
 import json
@@ -12,8 +12,8 @@ import sys
 import time
 
 if __package__ in (None, ""):
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    __package__ = "scripts.llm"
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    __package__ = "scripts"
 
 from . import macos
 from .processes import _atomic, _lock, _port_free, _read, _snapshot
@@ -79,7 +79,7 @@ class _Worker:
     def persist(self, initial=False):
         try:
             if initial:
-                # 起動元がロックを保持している間だけ、workerが初期記録を書き込む。
+                # The launcher holds the lock while the worker writes the initial record.
                 if _read(self.state_dir, self.engine).get("nonce") != self.record["nonce"]:
                     raise ValueError("Worker generation changed during handoff")
                 _atomic(self.state_dir, self.engine, self.record)

@@ -1,4 +1,4 @@
-"""起動世代ごとの所有権と、専用workerへの操作窓口。"""
+"""Keep ownership tied to a launch generation through a dedicated worker."""
 
 import contextlib
 import fcntl
@@ -76,6 +76,8 @@ def _atomic(state_dir, engine, record):
 
 def _port_free(port):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        # TIME_WAIT after shutdown does not mean a server still owns the port.
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         probe.bind(("127.0.0.1", port))
 
 
@@ -172,7 +174,7 @@ class Manager:
                 worker = subprocess.Popen(
                     [sys.executable, str(Path(__file__).with_name("worker.py"))],
                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                    start_new_session=True, cwd=str(Path(__file__).resolve().parents[2]),
+                    start_new_session=True, cwd=str(Path(__file__).resolve().parents[1]),
                 )
                 _WORKERS.append(worker)
                 worker.stdin.write(json.dumps({"state_dir": str(self.state_dir), "record": record, "launch": launch}).encode())

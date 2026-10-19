@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from importlib import import_module
 import json
 import os
 import socket
@@ -9,10 +10,10 @@ import time
 import unittest
 from unittest.mock import patch
 
-from scripts.llm import macos
+macos = import_module('scripts.macos')
 from pathlib import Path
 
-from scripts.llm.processes import Manager
+Manager = import_module('scripts.processes').Manager
 
 
 class ManagerTests(unittest.TestCase):
@@ -122,7 +123,8 @@ class ManagerTests(unittest.TestCase):
 
     def test_worker_survives_starting_parent_exit(self):
         code = (
-            "import json; from pathlib import Path; from scripts.llm.processes import Manager; "
+            "import json; from pathlib import Path; from importlib import import_module; "
+            "Manager = import_module('scripts.processes').Manager; "
             f"m=Manager(Path({str(self.base / 'state')!r}),Path({str(self.base / 'logs')!r})); "
             f"print(json.dumps(m.start('strata', {self.launch(self.free_port())!r})))"
         )
@@ -299,8 +301,24 @@ class ManagerTests(unittest.TestCase):
             "model_name": "テスト", "port": port, "engine_path": None,
         }
 
+    def test_restart_can_use_port_after_server_closed_connection(self):
+        with socket.socket() as listener:
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            listener.bind(("127.0.0.1", 0))
+            listener.listen()
+            port = listener.getsockname()[1]
+            with socket.create_connection(("127.0.0.1", port)) as client:
+                server, _ = listener.accept()
+                server.close()
+                self.assertEqual(client.recv(1), b"")
+        state = self.manager.start("strata", self.launch(port))
+        self.assertEqual(state["state"], "running", state)
+        self.assertTrue(state["owned"])
+        self.assertEqual(self.manager.stop("strata", state["nonce"])["state"], "stopped")
+
     def test_busy_port_refuses_launch_and_keeps_diagnostic(self):
         with socket.socket() as listener:
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             listener.bind(("127.0.0.1", 0))
             listener.listen()
             result = self.manager.start("strata", self.launch(listener.getsockname()[1]))

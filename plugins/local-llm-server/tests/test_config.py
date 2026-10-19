@@ -1,9 +1,10 @@
+from importlib import import_module
 import json
 from pathlib import Path
 import tempfile
 import unittest
 
-from scripts.llm.config import load
+load = import_module('scripts.config').load
 
 
 class ConfigTests(unittest.TestCase):

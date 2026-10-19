@@ -1,3 +1,4 @@
+from importlib import import_module
 import ctypes
 import errno
 import os
@@ -7,7 +8,7 @@ import sys
 import unittest
 from unittest.mock import patch
 
-from scripts.llm import macos
+macos = import_module('scripts.macos')
 
 
 class FakeLibc:

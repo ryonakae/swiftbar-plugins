@@ -11,8 +11,8 @@ import tempfile
 import time
 
 if __package__ in (None, ''):
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    __package__ = 'scripts.llm'
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    __package__ = 'scripts'
 
 from . import backends, config, dialogs, macos, menu
 from .processes import Manager
@@ -21,10 +21,11 @@ from .processes import Manager
 @dataclass
 class Paths:
     home: Path
+    root: Path = Path(__file__).resolve().parents[1]
 
     @property
     def config(self):
-        return self.home / '.config/swiftbar-plugins/llm.json'
+        return self.root / 'config/local-llm-server.json'
 
     @property
     def state(self):
@@ -89,7 +90,7 @@ class Controller:
         return digest, status.get('nonce'), status.get('owned'), self.selection(engine)
 
     def action(self, verb, engine, mid=None):
-        if engine not in config.ENGINES or verb not in ('start', 'stop', 'select', 'download'):
+        if engine not in config.ENGINES or verb not in ('start', 'stop', 'select'):
             raise ValueError('Unknown action.')
         error_path = self.paths.state / f'{engine}-action-error.json'
         try:
@@ -129,12 +130,10 @@ class Controller:
                     raise ValueError('The port is in use or cannot be checked. Stop external servers manually.')
             if verb == 'select' and self.selection(engine) == mid:
                 return current
-            needs_confirmation = verb in ('stop', 'download') or (verb == 'select' and current.get('owned'))
+            needs_confirmation = verb == 'stop' or (verb == 'select' and current.get('owned'))
         if needs_confirmation:
             if verb == 'stop':
                 message = f'Stop {engine.capitalize()}? Active requests will be interrupted.'
-            elif verb == 'download':
-                message = 'Start Splash online to download or update the model? Any managed server will be stopped and active requests interrupted.'
             else:
                 message = f'Change the {engine.capitalize()} model? The current server will be stopped and active requests interrupted.'
             if not self.confirm(message):
@@ -153,7 +152,7 @@ class Controller:
                 self.choose(engine, mid)
                 if not current.get('owned'):
                     return current
-            launch = backends.launch_plan(engine, settings, model, online=verb == 'download')
+            launch = backends.launch_plan(engine, settings, model)
             return self.manager.start(engine, launch)
 
     def observations(self):
@@ -248,6 +247,9 @@ class Controller:
             port = connection_port(status, cfg.engines.get(engine))
             if not port:
                 raise ValueError('Endpoint is not configured.')
+            if (not status.get('owned') and status.get('state') != 'unknown'
+                    and backends.observe(engine, port)['state'] == 'stopped'):
+                raise ValueError('Server is not running.')
             target = f'http://127.0.0.1:{port}/'
         elif engine == 'strata' and verb == 'model-config':
             target = next((m['config'] for m in cfg.engines.get(engine, {}).get('models', []) if m['id'] == mid), None)
@@ -262,11 +264,11 @@ def main():
     os.umask(0o077)
     controller = Controller(Paths(Path.home()))
     args = sys.argv[1:]
-    entry = Path(__file__).resolve().parents[2] / 'plugins/llm.5s.sh'
+    entry = Path(__file__).resolve().parents[1] / 'local-llm-server.5s.sh'
     try:
         if not args:
             print(controller.render(entry), end='')
-        elif args[0] in ('start', 'stop', 'select', 'download') and len(args) in (2, 3):
+        elif args[0] in ('start', 'stop', 'select') and len(args) in (2, 3):
             result = controller.action(*args)
             if result.get('state') in ('error', 'stop_failed', 'unknown'):
                 dialogs.notice(result.get('error') or 'The action could not be completed. Check the log.')
