@@ -191,6 +191,14 @@ class ManagerTests(unittest.TestCase):
         self.assertEqual(stopped["state"], "stopped", stopped)
         self.assertEqual(marker.read_text(), "stopped")
 
+    def test_stop_waits_for_descendant_isolated_by_server(self):
+        marker = self.base / "isolated"
+        state = self.manager.start("strata", self.fixture_launch("isolated", marker=marker))
+        self.wait_file(Path(state["log"]), "descendant=")
+        stopped = self.manager.stop("strata", state["nonce"])
+        self.assertEqual(stopped["state"], "stopped", stopped)
+        self.assertEqual(marker.read_text(), "stopped")
+
     def test_term_ignoring_child_keeps_owned_worker_and_blocks_restart(self):
         marker = self.base / "ignore-ready"
         state = self.manager.start("strata", self.fixture_launch("ignore", seconds=10, marker=marker))

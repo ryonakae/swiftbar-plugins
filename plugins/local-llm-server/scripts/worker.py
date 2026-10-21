@@ -126,8 +126,12 @@ class _Worker:
             current = macos.identity(child_pid)
             if current is None or current.start_time != start:
                 del self.known_descendants[child_pid]
-            elif current.pgid != pid or current.uid != os.getuid():
+            elif current.uid != os.getuid():
+                raise OSError("Known descendant changed owner")
+            elif current.pgid != pid and self.child is not None and child_pid == self.child.pid:
                 raise OSError("Known descendant remains outside the owned process group")
+            # Servers such as Strata isolate their engines in separate groups and end them on SIGTERM; such
+            # descendants are only waited for, never signalled.
             else:
                 alive.append(current)
         return alive
